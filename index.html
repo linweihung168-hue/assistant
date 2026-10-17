@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="manifest" href="manifest.json">
 <title>語音助理</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=7">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.26.0/dist/index.js"></script>
@@ -128,14 +128,14 @@
 
     <h3>其他</h3>
     <div class="row"><label for="sDbg">顯示除錯紀錄（找問題用）</label><input id="sDbg" type="checkbox" class="switch"></div>
-    <p class="muted">版本：<span id="ver"></span></p>
+    <div class="row"><span class="muted">版本：<span id="ver">（舊版）</span></span><button class="btn soft small" id="updBtn">載入最新版</button></div>
     </div>
   </div>
 </div>
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="brain.js"></script>
-<script src="app.js"></script>
+<script src="brain.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

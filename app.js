@@ -1,6 +1,6 @@
 // 語音助理（純網頁版）畫面與語音
 "use strict";
-const APP_VERSION = "v6";
+const APP_VERSION = "v7";
 // 除錯紀錄：設定裡打開後，畫面下方會顯示朗讀／收音的過程
 const dbgLines = [];
 function dbg(m) {
@@ -338,6 +338,12 @@ function bind() {
   };
   $("unClear").onclick = () => { Store.set("unanswered", []); fillData(); };
   $("bkOut").onclick = exportBackup;
+  // 強制抓 GitHub 上最新的檔案（iPhone 有時會留著舊版）
+  $("updBtn").onclick = async () => {
+    toast("更新中…");
+    try { await Promise.all(["./", "index.html", "app.js?v=7", "brain.js?v=7", "style.css?v=7", "app.js", "brain.js", "style.css"].map((f) => fetch(f, { cache: "reload" }))); } catch (e) {}
+    location.replace(location.pathname + "?t=" + Date.now());
+  };
   $("bkIn").onchange = async (e) => {
     const f = e.target.files[0]; e.target.value = "";
     if (!f) return;
