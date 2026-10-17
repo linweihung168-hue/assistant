@@ -167,3 +167,4 @@ html.lock,html.lock body{overflow:hidden;height:100%}
     padding:calc(10px + env(safe-area-inset-top)) 20px 0}
   #setModal .panel-body{padding-bottom:calc(28px + env(safe-area-inset-bottom))}
 }
+.dbg{margin:0 0 70px;background:#1E1E28;color:#B8F5C8;font-size:12px;line-height:1.5;padding:10px 12px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere}

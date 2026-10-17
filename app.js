@@ -1,5 +1,15 @@
 // 語音助理（純網頁版）畫面與語音
 "use strict";
+const APP_VERSION = "v6";
+// 除錯紀錄：設定裡打開後，畫面下方會顯示朗讀／收音的過程
+const dbgLines = [];
+function dbg(m) {
+  const d = new Date();
+  dbgLines.push(`${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")} ${m}`);
+  while (dbgLines.length > 14) dbgLines.shift();
+  const el = document.getElementById("dbg");
+  if (el && getSettings().debug) { el.hidden = false; el.textContent = dbgLines.join("\n"); }
+}
 const $ = (id) => document.getElementById(id);
 const WEEK = "日一二三四五六";
 let started = true, state = "idle", recog = null, voices = [];
@@ -43,13 +53,17 @@ async function speak(text, voiceOverride) {
     let done = false;
     const end = () => { if (done) return; done = true; if (state === "speaking") setState("idle"); resolve(); };
     let startedTalk = false;
-    u.onstart = () => { startedTalk = true; };
-    u.onend = end; u.onerror = end;
+    u.onstart = () => { startedTalk = true; dbg("朗讀開始"); };
+    u.onend = () => { dbg("朗讀結束"); end(); };
+    u.onerror = (e) => { dbg("朗讀錯誤：" + (e.error || "?")); end(); };
+    dbg(`送出朗讀（聲音：${v ? v.name : "預設"}，音訊模式：${navigator.audioSession ? navigator.audioSession.type : "不支援"}）`);
     setState("speaking");
+    try { speechSynthesis.resume(); } catch (e) {}
     speechSynthesis.speak(u);
     // 1.5 秒都沒開始念：重送一次
     setTimeout(() => {
       if (startedTalk || done) return;
+      dbg("1.5 秒沒開始，重送一次");
       speechSynthesis.cancel();
       setTimeout(() => { if (!done) speechSynthesis.speak(u); }, 200);
     }, 1500);
@@ -112,8 +126,9 @@ function listen() {
     setState("listening", "「" + (finalText + interim) + "」");
     arm();
   };
-  recog.onerror = (ev) => { err = ev.error; };
+  recog.onerror = (ev) => { err = ev.error; dbg("收音錯誤：" + ev.error); };
   recog.onend = async () => {
+    dbg("收音結束");
     clearTimeout(silenceT); clearTimeout(maxT);
     const txt = (finalText || interim).trim();
     if (txt) { await sleep(700); return handle(txt); }   // iPhone：等麥克風關好再出聲
@@ -246,7 +261,7 @@ function fillSettings() {
   const s = getSettings();
   $("sName").value = s.name; $("sRate").value = s.rate; $("rateVal").textContent = `（${Number(s.rate).toFixed(2)}）`;
   $("sSilence").value = String(s.silence_sec); $("sSnooze").value = String(s.snooze_min);
-  $("sChime").checked = !!s.chime; $("sLChime").checked = s.listen_chime !== false; $("sIos").checked = !!s.ios_reminder;
+  $("sChime").checked = !!s.chime; $("sDbg").checked = !!s.debug; $("ver").textContent = APP_VERSION; $("sLChime").checked = s.listen_chime !== false; $("sIos").checked = !!s.ios_reminder;
   fillVoiceSelect(); fillData(); fillHelp();
 }
 function fillData() {
@@ -264,7 +279,7 @@ function saveFromForm() {
   saveSettings({
     name: $("sName").value.trim() || "偉弘", voice: $("sVoice").value, rate: Number($("sRate").value),
     silence_sec: Number($("sSilence").value), snooze_min: Number($("sSnooze").value),
-    chime: $("sChime").checked, listen_chime: $("sLChime").checked, ios_reminder: $("sIos").checked,
+    chime: $("sChime").checked, debug: $("sDbg").checked, listen_chime: $("sLChime").checked, ios_reminder: $("sIos").checked,
   });
   $("rateVal").textContent = `（${Number($("sRate").value).toFixed(2)}）`;
   render();
@@ -311,7 +326,7 @@ function bind() {
     fillData(); render();
   });
 
-  ["sName", "sVoice", "sRate", "sSilence", "sSnooze", "sChime", "sLChime", "sIos"].forEach((id) => $(id).addEventListener("change", saveFromForm));
+  ["sName", "sVoice", "sRate", "sSilence", "sSnooze", "sChime", "sLChime", "sIos", "sDbg"].forEach((id) => $(id).addEventListener("change", saveFromForm));
   $("sRate").addEventListener("input", () => ($("rateVal").textContent = `（${Number($("sRate").value).toFixed(2)}）`));
   $("testVoice").onclick = () => { saveFromForm(); speak(`嗨 ${getSettings().name}，這是我現在的聲音。`, $("sVoice").value); };
   $("fileInput").onchange = (e) => { importFiles([...e.target.files]); e.target.value = ""; };
