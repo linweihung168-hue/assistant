@@ -33,6 +33,7 @@ async function speak(text, voiceOverride) {
   if (!text || !("speechSynthesis" in window)) return;
   if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); await sleep(250); } // Safari：cancel 後馬上 speak 會沒聲音
   try { if (actx && actx.state === "running") await actx.suspend(); } catch (e) {}       // iPhone：提示音的音訊通道會蓋掉朗讀
+  setAudioMode("playback");   // iPhone：麥克風用完後聲音會走聽筒（很小聲），切回喇叭
   return new Promise((resolve) => {
     const s = getSettings();
     const u = new SpeechSynthesisUtterance(text);
@@ -41,11 +42,22 @@ async function speak(text, voiceOverride) {
     u.rate = Number(s.rate || 1); u.volume = 1;
     let done = false;
     const end = () => { if (done) return; done = true; if (state === "speaking") setState("idle"); resolve(); };
+    let startedTalk = false;
+    u.onstart = () => { startedTalk = true; };
     u.onend = end; u.onerror = end;
     setState("speaking");
     speechSynthesis.speak(u);
+    // 1.5 秒都沒開始念：重送一次
+    setTimeout(() => {
+      if (startedTalk || done) return;
+      speechSynthesis.cancel();
+      setTimeout(() => { if (!done) speechSynthesis.speak(u); }, 200);
+    }, 1500);
     setTimeout(() => { if (!speechSynthesis.speaking && !speechSynthesis.pending) end(); }, 2000 + text.length * 450);
   });
+}
+function setAudioMode(type) {
+  try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
 }
 function stopSpeaking() { if ("speechSynthesis" in window) speechSynthesis.cancel(); if (state === "speaking") setState("idle"); }
 
@@ -85,6 +97,7 @@ function listen() {
   unlockAudio();
   if (getSettings().listen_chime !== false) chime(true);
   const silence = Number(getSettings().silence_sec || 1.5) * 1000;
+  setAudioMode("play-and-record");
   recog = new SR();
   recog.lang = "zh-TW"; recog.interimResults = true; recog.continuous = true; recog.maxAlternatives = 1;
   let finalText = "", interim = "", err = "", silenceT = null;
@@ -121,6 +134,7 @@ function addBubble(who, text, detail, kind) {
   const chat = $("chat");
   const b = document.createElement("div");
   b.className = "bub " + who + (kind === "unknown" ? " unknown" : "");
+  if (who === "ai") { b.dataset.say = speakify(text); b.title = "點一下再念一次"; }
   b.innerHTML = esc(text) + (detail && detail.length ? `<ul class="det">${detail.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : "");
   chat.appendChild(b);
   while (chat.children.length > 40) chat.removeChild(chat.firstChild);
@@ -216,7 +230,7 @@ async function snooze() { if (!remShowing) return; const m = Number(getSettings(
 function fillHelp() {
   $("helpBody").innerHTML = HELP.map(([g, qs]) => `<div class="help-g">${esc(g)}</div>` + qs.map((q) => `<button class="help-q" data-q="${esc(q)}">${esc(q)}</button>`).join("")).join("");
 }
-function openSettingsAt(id) { fillSettings(); $("setModal").hidden = false; setTimeout(() => $(id).scrollIntoView({ block: "start" }), 50); }
+function openSettingsAt(id) { fillSettings(); $("setModal").hidden = false; setTimeout(() => { const el = $(id), body = el.closest(".panel-body"); body.scrollTop = el.offsetTop - body.offsetTop - 40; }, 50); }
 
 // ---------- 設定 ----------
 function fillVoiceSelect() {
@@ -280,10 +294,12 @@ function bind() {
   $("ackBtn").onclick = ack; $("snoozeBtn").onclick = snooze;
   document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
   document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => (b.closest(".overlay").hidden = true)));
+  new MutationObserver(() => document.documentElement.classList.toggle("lock", !$("setModal").hidden)).observe($("setModal"), { attributes: true, attributeFilter: ["hidden"] });
   $("setModal").addEventListener("click", (e) => { if (e.target.id === "setModal") $("setModal").hidden = true; });
   $("helpBody").onclick = (e) => { const q = e.target.dataset.q; if (q) { $("setModal").hidden = true; unlockAudio(); handle(q); } };
   ["touchstart", "mousedown", "keydown"].forEach((ev) => document.addEventListener(ev, unlockAudio, { once: true, passive: true }));
 
+  $("chat").addEventListener("click", (e) => { const b = e.target.closest(".bub.ai"); if (b && b.dataset.say) speak(b.dataset.say); });
   document.body.addEventListener("click", (e) => {
     const t = e.target.closest("[data-del-rem],[data-del-note],[data-del-sch],[data-del-tb],[data-del-nk]");
     if (!t) return;

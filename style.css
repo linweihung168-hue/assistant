@@ -154,3 +154,16 @@ h1{margin:0;font-size:30px;font-weight:900;letter-spacing:.5px}
 }
 .toast{bottom:calc(var(--tabh) + 74px + env(safe-area-inset-bottom))}
 @media (min-width:900px){ .toast{bottom:80px} }
+.bub.ai{cursor:pointer}
+
+/* 設定頁：手機上整頁顯示，只有內容區捲動（避免上下被擋、滑動卡卡） */
+.panel{display:flex;flex-direction:column;overflow:hidden;max-height:calc(100dvh - 32px)}
+.panel-h{position:static;flex:0 0 auto;padding:0 0 8px}
+.panel-body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:12px}
+html.lock,html.lock body{overflow:hidden;height:100%}
+@media (max-width:899px){
+  #setModal{padding:0;align-items:stretch;background:#fff}
+  #setModal .panel{width:100%;max-width:none;height:100dvh;max-height:none;border-radius:0;box-shadow:none;
+    padding:calc(10px + env(safe-area-inset-top)) 20px 0}
+  #setModal .panel-body{padding-bottom:calc(28px + env(safe-area-inset-bottom))}
+}
