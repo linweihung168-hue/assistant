@@ -32,6 +32,7 @@ function pickVoice() {
 async function speak(text, voiceOverride) {
   if (!text || !("speechSynthesis" in window)) return;
   if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); await sleep(250); } // Safari：cancel 後馬上 speak 會沒聲音
+  try { if (actx && actx.state === "running") await actx.suspend(); } catch (e) {}       // iPhone：提示音的音訊通道會蓋掉朗讀
   return new Promise((resolve) => {
     const s = getSettings();
     const u = new SpeechSynthesisUtterance(text);
@@ -55,7 +56,7 @@ function unlockAudio() {
   if (audioUnlocked) return;
   audioUnlocked = true;
   try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {}
-  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch (e) {}
+  try { const u = new SpeechSynthesisUtterance("。"); u.volume = 0; u.lang = "zh-TW"; speechSynthesis.speak(u); } catch (e) {}
 }
 // soft=true：開始聽的「叮」聲（類似 Siri）；否則是提醒的叮咚
 function chime(soft) {
@@ -67,6 +68,7 @@ function chime(soft) {
       const o = actx.createOscillator(), g = actx.createGain();
       o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0 + dt);
       const len = soft ? 0.28 : 0.5;
+      setTimeout(() => { try { if (!speechSynthesis.speaking) actx.suspend(); } catch (e) {} }, 900);
       g.gain.exponentialRampToValueAtTime(soft ? 0.22 : 0.35, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + len);
       o.type = "sine"; o.connect(g).connect(actx.destination); o.start(t0 + dt); o.stop(t0 + dt + len + 0.05);
     });
@@ -81,7 +83,7 @@ function listen() {
   if (state === "listening") { try { recog.stop(); } catch (e) {} return; }
   stopSpeaking();
   unlockAudio();
-  chime(true);
+  if (getSettings().listen_chime !== false) chime(true);
   const silence = Number(getSettings().silence_sec || 1.5) * 1000;
   recog = new SR();
   recog.lang = "zh-TW"; recog.interimResults = true; recog.continuous = true; recog.maxAlternatives = 1;
@@ -101,7 +103,7 @@ function listen() {
   recog.onend = async () => {
     clearTimeout(silenceT); clearTimeout(maxT);
     const txt = (finalText || interim).trim();
-    if (txt) { await sleep(300); return handle(txt); }   // iPhone：等麥克風關好再出聲
+    if (txt) { await sleep(700); return handle(txt); }   // iPhone：等麥克風關好再出聲
     const msg = {
       "not-allowed": "麥克風被拒絕了：請到 iPhone「設定 → Safari → 麥克風」允許。",
       "service-not-allowed": "語音辨識不能用：請到 iPhone「設定 → Siri」打開 Siri。",
@@ -230,7 +232,7 @@ function fillSettings() {
   const s = getSettings();
   $("sName").value = s.name; $("sRate").value = s.rate; $("rateVal").textContent = `（${Number(s.rate).toFixed(2)}）`;
   $("sSilence").value = String(s.silence_sec); $("sSnooze").value = String(s.snooze_min);
-  $("sChime").checked = !!s.chime; $("sIos").checked = !!s.ios_reminder;
+  $("sChime").checked = !!s.chime; $("sLChime").checked = s.listen_chime !== false; $("sIos").checked = !!s.ios_reminder;
   fillVoiceSelect(); fillData(); fillHelp();
 }
 function fillData() {
@@ -248,7 +250,7 @@ function saveFromForm() {
   saveSettings({
     name: $("sName").value.trim() || "偉弘", voice: $("sVoice").value, rate: Number($("sRate").value),
     silence_sec: Number($("sSilence").value), snooze_min: Number($("sSnooze").value),
-    chime: $("sChime").checked, ios_reminder: $("sIos").checked,
+    chime: $("sChime").checked, listen_chime: $("sLChime").checked, ios_reminder: $("sIos").checked,
   });
   $("rateVal").textContent = `（${Number($("sRate").value).toFixed(2)}）`;
   render();
@@ -293,7 +295,7 @@ function bind() {
     fillData(); render();
   });
 
-  ["sName", "sVoice", "sRate", "sSilence", "sSnooze", "sChime", "sIos"].forEach((id) => $(id).addEventListener("change", saveFromForm));
+  ["sName", "sVoice", "sRate", "sSilence", "sSnooze", "sChime", "sLChime", "sIos"].forEach((id) => $(id).addEventListener("change", saveFromForm));
   $("sRate").addEventListener("input", () => ($("rateVal").textContent = `（${Number($("sRate").value).toFixed(2)}）`));
   $("testVoice").onclick = () => { saveFromForm(); speak(`嗨 ${getSettings().name}，這是我現在的聲音。`, $("sVoice").value); };
   $("fileInput").onchange = (e) => { importFiles([...e.target.files]); e.target.value = ""; };
