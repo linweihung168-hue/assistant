@@ -329,11 +329,29 @@ function findPerson(t, allowPinyin = true) {
   const ppl = peopleIndex();
   if (!ppl.length) return [];
   const nk = nicknames();
-  for (const k of Object.keys(nk).sort((a, b) => b.length - a.length)) {
-    if (t.includes(k)) {
-      const target = nk[k];
-      const hit = ppl.filter((p) => p.full === target || p.given === target || p.full.endsWith(target));
-      if (hit.length) return hit;
+  const tp = [...t].filter((c) => c >= "一" && c <= "鿿").map((c) => pinyinOf(c)[0]);
+  const pyIn = (word) => {          // 同音字也算：「阿宏」也對得到「阿弘」
+    const wp = pinyinOf(word); const n = wp.length;
+    if (!n || !window.pinyinPro) return false;
+    for (let i = 0; i + n <= tp.length; i++) if (wp.every((x, j) => x === tp[i + j])) return true;
+    return false;
+  };
+  const targetHit = (target) => {
+    target = target.trim();
+    let hit = ppl.filter((p) => p.full === target || p.given === target || p.full.endsWith(target) || target.endsWith(p.given));
+    if (!hit.length && window.pinyinPro) {
+      const tg = pinyinOf(target).join(" ");
+      hit = ppl.filter((p) => pinyinOf(p.full).join(" ") === tg || pinyinOf(p.given).join(" ") === tg || tg.endsWith(pinyinOf(p.given).join(" ")));
+    }
+    return hit;
+  };
+  const keys = Object.keys(nk).sort((a, b) => b.length - a.length);
+  for (const pass of [0, 1]) {
+    for (const k of keys) {
+      if (pass === 0 ? t.includes(k) : (allowPinyin && pyIn(k))) {
+        const hit = targetHit(nk[k]);
+        if (hit.length) return hit;
+      }
     }
   }
   let hit = ppl.filter((p) => t.includes(p.full));
