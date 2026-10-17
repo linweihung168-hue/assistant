@@ -2,7 +2,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const WEEK = "日一二三四五六";
-let started = false, state = "idle", recog = null, voices = [];
+let started = true, state = "idle", recog = null, voices = [];
 let remQueue = [], remShowing = null, remTimer = null;
 const fired = new Set();
 
@@ -11,14 +11,14 @@ function toast(msg, ms = 3500) { const t = $("toast"); t.textContent = msg; t.hi
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- 狀態 ----------
-const STATUS = { idle: "點麥克風說話", listening: "我在聽…", thinking: "查詢中…", speaking: "說話中…（點一下可打斷）" };
+const STATUS = { idle: "點一下說話", listening: "我在聽…", thinking: "查詢中…", speaking: "說話中…（點一下可打斷）" };
 function setState(s, text) {
   state = s;
   $("micCard").dataset.state = s;
   $("status").textContent = text || STATUS[s];
   $("micBtn").setAttribute("aria-label", s === "listening" ? "停止聆聽" : "開始說話");
 }
-function tickClock() { const d = new Date(); $("clock").textContent = `${d.getMonth() + 1}/${d.getDate()} 週${WEEK[d.getDay()]}　${hhmm(d)}`; }
+
 
 // ---------- 說話 ----------
 function loadVoices() { voices = speechSynthesis.getVoices(); fillVoiceSelect(); }
@@ -49,16 +49,26 @@ async function speak(text, voiceOverride) {
 function stopSpeaking() { if ("speechSynthesis" in window) speechSynthesis.cancel(); if (state === "speaking") setState("idle"); }
 
 let actx = null;
-function chime() {
+// 第一次碰到畫面時「解鎖」聲音（iPhone 規定要先有動作才能出聲）
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {}
+  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch (e) {}
+}
+// soft=true：開始聽的「叮」聲（類似 Siri）；否則是提醒的叮咚
+function chime(soft) {
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
     actx.resume();
     const t0 = actx.currentTime;
-    [[880, 0], [1175, 0.18]].forEach(([f, dt]) => {
+    (soft ? [[784, 0], [1175, 0.09]] : [[880, 0], [1175, 0.18]]).forEach(([f, dt]) => {
       const o = actx.createOscillator(), g = actx.createGain();
       o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0 + dt);
-      g.gain.exponentialRampToValueAtTime(0.35, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.5);
-      o.connect(g).connect(actx.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.55);
+      const len = soft ? 0.28 : 0.5;
+      g.gain.exponentialRampToValueAtTime(soft ? 0.22 : 0.35, t0 + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + len);
+      o.type = "sine"; o.connect(g).connect(actx.destination); o.start(t0 + dt); o.stop(t0 + dt + len + 0.05);
     });
   } catch (e) {}
   return sleep(700);
@@ -70,6 +80,8 @@ function listen() {
   if (!SR) { toast("這個瀏覽器不能語音輸入，請用 iPhone 的 Safari 或電腦的 Edge。打字仍然可以用。"); return; }
   if (state === "listening") { try { recog.stop(); } catch (e) {} return; }
   stopSpeaking();
+  unlockAudio();
+  chime(true);
   const silence = Number(getSettings().silence_sec || 1.5) * 1000;
   recog = new SR();
   recog.lang = "zh-TW"; recog.interimResults = true; recog.continuous = true; recog.maxAlternatives = 1;
@@ -110,6 +122,7 @@ function addBubble(who, text, detail, kind) {
   b.innerHTML = esc(text) + (detail && detail.length ? `<ul class="det">${detail.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>` : "");
   chat.appendChild(b);
   while (chat.children.length > 40) chat.removeChild(chat.firstChild);
+  $("paneChat").classList.add("has-chat");
   b.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 async function handle(text) {
@@ -126,7 +139,7 @@ async function handle(text) {
   try { r = answer(text); } catch (e) { r = reply("抱歉，出了一點問題：" + e.message); }
   addBubble("ai", r.reply, r.detail, r.kind);
   render();
-  if (r.kind === "help") openHelp();
+  if (r.kind === "help") openSettingsAt("helpBody");
   await speak(r.speak || r.reply);
   if (r.reminder && getSettings().ios_reminder) sendToIOS(r.reminder);
 }
@@ -143,7 +156,6 @@ function showTab(name) {
 }
 function render() {
   const s = getSettings();
-  $("hi").textContent = `嗨 ${s.name}！`; $("startHi").textContent = `嗨 ${s.name}！`;
   const now = new Date(), today = now.toDateString();
   const rs = reminders();
   const todays = rs.filter((r) => new Date(r.due).toDateString() === today || new Date(r.due) < now);
@@ -168,8 +180,6 @@ function render() {
       const when = (d.toDateString() === today ? "今天" : new Date(now - 864e5).toDateString() === d.toDateString() ? "昨天" : `${d.getMonth() + 1}/${d.getDate()}`) + " " + hhmm(d);
       return `<div class="item"><div class="num">${i + 1}</div><div class="body"><div class="main-t">${esc(n.text)}</div><div class="sub">${when}</div></div><button class="x" data-del-note="${n.id}" aria-label="刪除記事">✕</button></div>`;
     }).join("");
-  const lab = scheduleLabel(), nt = Object.keys(tablesStore()).length;
-  $("foot").textContent = `${lab ? "班表：" + lab : "還沒有班表"}　・　${nt ? "資料表 " + nt + " 個" : "還沒有資料表"}`;
 }
 
 // ---------- 提醒計時 ----------
@@ -200,11 +210,11 @@ function closeReminder() {
 async function ack() { if (!remShowing) return; ackReminder(remShowing.id); closeReminder(); speak("好的。"); }
 async function snooze() { if (!remShowing) return; const m = Number(getSettings().snooze_min); snoozeReminder(remShowing.id, m); closeReminder(); speak(`好，${m} 分鐘後再提醒你。`); }
 
-// ---------- 說明 ----------
-function openHelp() {
+// ---------- 說明（放在設定頁最下面）----------
+function fillHelp() {
   $("helpBody").innerHTML = HELP.map(([g, qs]) => `<div class="help-g">${esc(g)}</div>` + qs.map((q) => `<button class="help-q" data-q="${esc(q)}">${esc(q)}</button>`).join("")).join("");
-  $("helpModal").hidden = false;
 }
+function openSettingsAt(id) { fillSettings(); $("setModal").hidden = false; setTimeout(() => $(id).scrollIntoView({ block: "start" }), 50); }
 
 // ---------- 設定 ----------
 function fillVoiceSelect() {
@@ -219,15 +229,15 @@ function fillVoiceSelect() {
 function fillSettings() {
   const s = getSettings();
   $("sName").value = s.name; $("sRate").value = s.rate; $("rateVal").textContent = `（${Number(s.rate).toFixed(2)}）`;
-  $("sSilence").value = String(s.silence_sec); $("sRepeat").value = String(s.repeat_min); $("sSnooze").value = String(s.snooze_min);
+  $("sSilence").value = String(s.silence_sec); $("sSnooze").value = String(s.snooze_min);
   $("sChime").checked = !!s.chime; $("sIos").checked = !!s.ios_reminder;
-  fillVoiceSelect(); fillData();
+  fillVoiceSelect(); fillData(); fillHelp();
 }
 function fillData() {
   const sch = schedules(), tb = tablesStore();
   const items = Object.keys(sch).sort().map((k) => `<div><span>${sch[k].year} 年 ${sch[k].month} 月班表・${sch[k].people.length} 位</span><button data-del-sch="${k}">刪除</button></div>`)
     .concat(Object.keys(tb).map((k) => `<div><span>${esc(k)}・${tb[k].reduce((a, x) => a + x.rows.length, 0)} 筆</span><button data-del-tb="${esc(k)}">刪除</button></div>`));
-  $("dataList").innerHTML = items.join("") || `<div><span>還沒有資料</span></div>`;
+  $("dataList").innerHTML = items.join("");
   const nk = getSettings().nicknames || {};
   $("nickList").innerHTML = Object.keys(nk).map((k) => `<div><span>${esc(k)} → ${esc(nk[k])}</span><button data-del-nk="${esc(k)}">刪除</button></div>`).join("");
   const un = Store.get("unanswered", []);
@@ -237,7 +247,7 @@ function fillData() {
 function saveFromForm() {
   saveSettings({
     name: $("sName").value.trim() || "偉弘", voice: $("sVoice").value, rate: Number($("sRate").value),
-    silence_sec: Number($("sSilence").value), repeat_min: Number($("sRepeat").value), snooze_min: Number($("sSnooze").value),
+    silence_sec: Number($("sSilence").value), snooze_min: Number($("sSnooze").value),
     chime: $("sChime").checked, ios_reminder: $("sIos").checked,
   });
   $("rateVal").textContent = `（${Number($("sRate").value).toFixed(2)}）`;
@@ -261,32 +271,16 @@ async function exportBackup() {
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
 }
 
-// ---------- 開始 ----------
-async function start() {
-  if (started) return;
-  started = true;
-  $("start").hidden = true;
-  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch (e) {}
-  for (let i = 0; i < 20 && !voices.length; i++) { await sleep(100); voices = speechSynthesis.getVoices(); }
-  let text = greeting();
-  const missed = reminders().filter((r) => new Date(r.due) < new Date(Date.now() - 60000));
-  if (missed.length) text += `你有 ${missed.length} 個錯過的提醒。`;
-  addBubble("ai", text);
-  await speak(text);
-  checkReminders();
-}
-
 function bind() {
-  $("startBtn").onclick = start;
   $("micBtn").onclick = () => (state === "speaking" ? stopSpeaking() : listen());
   $("typeForm").onsubmit = (e) => { e.preventDefault(); const v = $("typed").value; $("typed").value = ""; $("typed").blur(); handle(v); };
-  $("helpBtn").onclick = openHelp;
   $("setBtn").onclick = () => { fillSettings(); $("setModal").hidden = false; };
   $("ackBtn").onclick = ack; $("snoozeBtn").onclick = snooze;
   document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
   document.querySelectorAll("[data-close]").forEach((b) => (b.onclick = () => (b.closest(".overlay").hidden = true)));
-  ["helpModal", "setModal"].forEach((id) => $(id).addEventListener("click", (e) => { if (e.target.id === id) $(id).hidden = true; }));
-  $("helpBody").onclick = (e) => { const q = e.target.dataset.q; if (q) { $("helpModal").hidden = true; handle(q); } };
+  $("setModal").addEventListener("click", (e) => { if (e.target.id === "setModal") $("setModal").hidden = true; });
+  $("helpBody").onclick = (e) => { const q = e.target.dataset.q; if (q) { $("setModal").hidden = true; unlockAudio(); handle(q); } };
+  ["touchstart", "mousedown", "keydown"].forEach((ev) => document.addEventListener(ev, unlockAudio, { once: true, passive: true }));
 
   document.body.addEventListener("click", (e) => {
     const t = e.target.closest("[data-del-rem],[data-del-note],[data-del-sch],[data-del-tb],[data-del-nk]");
@@ -299,7 +293,7 @@ function bind() {
     fillData(); render();
   });
 
-  ["sName", "sVoice", "sRate", "sSilence", "sRepeat", "sSnooze", "sChime", "sIos"].forEach((id) => $(id).addEventListener("change", saveFromForm));
+  ["sName", "sVoice", "sRate", "sSilence", "sSnooze", "sChime", "sIos"].forEach((id) => $(id).addEventListener("change", saveFromForm));
   $("sRate").addEventListener("input", () => ($("rateVal").textContent = `（${Number($("sRate").value).toFixed(2)}）`));
   $("testVoice").onclick = () => { saveFromForm(); speak(`嗨 ${getSettings().name}，這是我現在的聲音。`, $("sVoice").value); };
   $("fileInput").onchange = (e) => { importFiles([...e.target.files]); e.target.value = ""; };
@@ -323,24 +317,22 @@ function bind() {
     const tag = (document.activeElement?.tagName || "").toLowerCase();
     if (["input", "textarea", "select"].includes(tag)) return;
     e.preventDefault();
-    if (!started) return start();
-    if (!$("helpModal").hidden || !$("setModal").hidden) return;
+    if (!$("setModal").hidden) return;
     listen();
   });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") ["helpModal", "setModal"].forEach((id) => ($(id).hidden = true)); });
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { tickClock(); render(); checkReminders(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("setModal").hidden = true; });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { render(); checkReminders(); } });
 }
 
 (function init() {
   bind();
   showTab("chat");
-  tickClock(); setInterval(tickClock, 5000);
   const miss = [];
   if (!SR) miss.push("語音輸入");
   if (!window.JSZip || !window.XLSX) miss.push("讀檔元件（請確認網路）");
   if (miss.length) { $("banner").textContent = "目前無法使用：" + miss.join("、") + "。打字仍然可以用。"; $("banner").hidden = false; }
   if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-  if (window.matchMedia("(min-width:900px)").matches) $("status").textContent = "按空白鍵或點麥克風說話";
+  if (window.matchMedia("(min-width:900px)").matches) $("status").textContent = "按空白鍵或點一下說話";
   STATUS.idle = $("status").textContent;
   render();
   setInterval(checkReminders, 1000);

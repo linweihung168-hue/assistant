@@ -386,16 +386,7 @@ function describeCell(c, person, date, holiday) {
   if (holiday) extra.push("國定假日");
   return { code, desc: name + (extra.length ? "，" + extra.join("，") : ""), raw };
 }
-const codeSay = (code, desc) => (["N", "R", "r", "HS", "NN", "ZZ", "GB", "--", "M1"].includes(code) ? desc : `${code} ${desc}`.trim());
-
-const SHIFT_CATS = {
-  "小夜": ["A1", "A3", "S1", "S2", "S7", "S8", "S9", "B"], "大夜": ["P"],
-  "夜班": ["A1", "A3", "S1", "S2", "S7", "S8", "S9", "B", "P"], "早班": ["E", "E7"], "美沙冬": ["E"],
-  "中午值班": ["F", "FA", "E"], "值班": ["F", "FA", "E"], "送藥": ["FA"],
-  "休假": ["R", "r", "HS", "NN", "ZZ", "GB"], "休息": ["R", "r", "HS", "NN", "ZZ", "GB"], "特休": ["HS"],
-  "正常班": ["N"], "白班": ["N", "M1"],
-};
-const CODE_RE = /(?<![A-Z0-9])(A1|A3|S1|S2|S7|S8|S9|E7|FA|NN|HS|ZZ|M1|B4|N|E|F|B|P)(?![A-Z0-9])/g;
+const CODE_RE = /(?<![A-Z0-9])(A1|A3|S1|S2|S7|S8|S9|E7|FA|F1|F2|NN|HS|ZZ|M1|B4|N|E|F|B|P)(?![A-Z0-9])/g;
 // 語音辨識常把英文字母寫成中文同音字，例如「愛斯2」＝S2、「欸3」＝A3
 const SOUND_LETTER = [[/(?:愛斯|艾斯|爱斯|ES)\s*(?=[0-9一二三四五六七八九])/gi, "S"], [/(?:欸|誒|ㄟ|诶)\s*(?=[0-9一二三四五六七八九])/g, "A"],
   [/(?:伊|衣|依)\s*(?=[7七])/g, "E"], [/(?:逼|比)\s*(?=[0-9一二三四五六七八九])/g, "B"], [/(?:欸|誒)\s*(?:辅|輔|夫|福)/g, "F"]];
@@ -410,62 +401,154 @@ function normCodes(t) {
 function findCodes(t) {
   const u = normCodes(t);
   const u2 = u.replace(/(?<![A-Z])(AM|PM|UD|IP|OK)(?![A-Z])/g, " ");
-  return [[...u2.matchAll(CODE_RE)].map((m) => m[1]), u];
+  return [[...u2.matchAll(CODE_RE)].map((m) => (m[1] === "F1" || m[1] === "F2" ? "F" : m[1])), u];
+}
+
+// ---- 班別分類（依偉弘的說明）----
+const NIGHT_WEEKDAY = ["A1", "S1", "A3", "S2", "B"];   // 平日小夜
+const NIGHT_WEEKEND = ["S7", "S8", "S9"];             // 六日小夜
+const NIGHT_ALL = [...NIGHT_WEEKDAY, ...NIGHT_WEEKEND];
+const DUTY = ["E", "F", "FA"];                          // 中午值班（F 含 F1、F2）；週日再加 E7
+const OFF = ["R", "r", "HS", "NN", "ZZ", "GB", "--"];
+const isWeekend = (d) => wdOf(d) >= 5;
+
+function catCodes(label, d) {
+  if (label === "小夜") return isWeekend(d) ? NIGHT_WEEKEND : NIGHT_WEEKDAY;
+  if (label === "大夜") return ["P"];
+  if (label === "夜班") return [...NIGHT_ALL, "P"];
+  if (label === "值班") return wdOf(d) === 6 ? [...DUTY, "E7"] : DUTY;
+  if (label === "休假") return OFF;
+  if (label === "特休") return ["HS"];
+  if (label === "正常班") return ["N"];
+  return null;
+}
+const CAT_WORDS = [["中午值班", "值班"], ["假日值班", "值班"], ["值班", "值班"], ["小夜", "小夜"], ["大夜", "大夜"], ["夜班", "夜班"],
+  ["休假", "休假"], ["休息", "休假"], ["放假", "休假"], ["特休", "特休"], ["正常班", "正常班"]];
+function findCat(t) { for (const [w, c] of CAT_WORDS) if (t.includes(w)) return c; return null; }
+
+// 「今天、明天」這種說法；其他日子用「10月5日」
+function dayWord(d) {
+  const diff = Math.round((dayOnly(d) - dayOnly(nowDate())) / 864e5);
+  return ({ "-1": "昨天", 0: "今天", 1: "明天", 2: "後天" })[diff] || `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+// 一個人一天的班，用短句念：正常班／休假／A3 小夜／小夜，下午 PM
+function shortSay(x, c) {
+  const halfTxt = c.half ? `${c.half === "AM" ? "上午" : "下午"} ${c.half}` : "";
+  let base;
+  if (x.code === "N") base = "正常班";
+  else if (x.code === "R" || x.code === "r") base = "休假";
+  else if (x.code === "--") base = "不上班";
+  else if (OFF.includes(x.code)) base = (CODE_INFO[x.code] || {}).name || EXTRA_NAMES[x.code] || x.code;
+  else if (NIGHT_ALL.includes(x.code)) base = halfTxt ? "小夜" : `${x.code} 小夜`;
+  else if (x.code === "P") base = halfTxt ? "大夜" : "P 大夜";
+  else if (DUTY.includes(x.code) || x.code === "E7") base = halfTxt ? "值班" : `${x.code} 值班`;
+  else if (x.code === "M1") base = "中醫白班";
+  else base = x.code;
+  const extra = [];
+  if (halfTxt) extra.push(halfTxt);
+  if (c.hours !== null && c.hours !== undefined) extra.push(`當天上班 ${fmtNum(c.hours)} 小時`);
+  return base + (extra.length ? "，" + extra.join("，") : "");
+}
+
+function cellOf(per, day) {
+  const sch = schedFor(day);
+  if (!sch) return null;
+  const p = sch.people.find((x) => x.id === per.id);
+  const c = p && p.cells[day.getDate()];
+  if (!c) return null;
+  return { c, p, x: describeCell(c, p, day, sch.holidays.includes(day.getDate())) };
+}
+
+function findWho(t, s) {
+  let ppl = findPerson(t);
+  if (!ppl.length && t.includes("我")) {
+    const p = peopleIndex().find((p) => s.name && (p.given === s.name || p.full === s.name));
+    if (p) return { ppl: [p], me: true };
+  }
+  return { ppl, me: false };
 }
 
 function askSchedule(t, s) {
-  if (!Object.keys(schedules()).length) return reply("還沒有班表。請到「設定 → 資料」匯入 Word 班表。");
+  if (!Object.keys(schedules()).length) return reply("還沒有班表。請到設定匯入 Word 班表。");
+
+  // 「我小夜什麼時候」「○○這個月值班哪幾天」
+  if (/什麼時候|哪幾天|哪天|幾號|幾次/.test(t) && findCat(t) && !t.includes("誰")) {
+    const { ppl, me } = findWho(t, s);
+    if (!ppl.length) return reply("我找不到這個人。");
+    if (ppl.length > 1) return reply(`有 ${ppl.length} 位同名，是哪一位？`);
+    const cat = findCat(t);
+    const mm = t.match(/(\d{1,2})\s*月/);
+    const base = mm ? new Date(nowDate().getFullYear(), +mm[1] - 1, 1) : nowDate();
+    const sch = schedFor(base);
+    if (!sch) return reply(`還沒有 ${base.getMonth() + 1} 月的班表。`);
+    const days = [];
+    for (let d = 1; d <= sch.ndays; d++) {
+      const day = new Date(sch.year, sch.month - 1, d);
+      const r = cellOf(ppl[0], day);
+      if (r && catCodes(cat, day).includes(r.x.code)) days.push(day);
+    }
+    const who = me ? "你" : ppl[0].given;
+    if (!days.length) return reply(`${who} ${sch.month} 月沒有${cat === "休假" ? "休假" : cat}。`);
+    const list = days.map((d) => `${d.getMonth() + 1}月${d.getDate()}日`);
+    return reply(`${who}的${cat}是 ${list.join("、")}。`, [`共 ${days.length} 天`]);
+  }
+
   const [d, mode] = parseDate(t);
   if (!d) return reply("我聽不懂是哪一天，可以說「明天」、「週三」或「10 月 5 號」。");
+  const dw = dayWord(d);
 
+  // 誰上什麼班
   if (t.includes("誰")) {
-    const [codes] = findCodes(t);
-    let want = null, label = "";
-    for (const k of Object.keys(SHIFT_CATS).sort((a, b) => b.length - a.length)) if (t.includes(k)) { want = SHIFT_CATS[k]; label = k; break; }
-    if (!want && codes.length) { want = codes; label = codes.join("/"); }
     const sch = schedFor(d);
     if (!sch) return reply(`還沒有 ${d.getMonth() + 1} 月的班表。`);
-    if (!want) return dayRoster(sch, d);
     const hol = sch.holidays.includes(d.getDate());
+    const [codes] = findCodes(t);
+    const cat = findCat(t);
+    let want = null, label = "";
+    if (codes.length) {
+      want = codes;
+      const raw = [...normCodes(t).replace(/(?<![A-Z])(AM|PM|UD|IP|OK)(?![A-Z])/g, " ").matchAll(CODE_RE)].map((m) => m[1]);
+      label = raw.join("、");
+    }
+    else if (cat) { want = catCodes(cat, d); label = cat; }
+    if (!want) return dayRoster(sch, d);
     const names = [], lines = [];
     for (const p of sch.people) {
       const c = p.cells[d.getDate()]; if (!c) continue;
       const x = describeCell(c, p, d, hol);
-      if (want.includes(x.code)) { names.push(givenName(p.name)); lines.push(`${p.name}：${x.code} ${x.desc}`); }
+      if (want.includes(x.code)) { names.push(givenName(p.name)); lines.push(`${p.name}：${shortSay(x, c)}`); }
     }
-    const verb = /休|特休/.test(label) ? "" : "上";
-    if (!names.length) return reply(`${dateLabel(d)} 沒有人${verb}${label}。`);
-    return reply(`${dateLabel(d)} ${verb}${label}的有：${names.join("、")}。`, lines);
+    const who = names.join("、");
+    if (label === "值班") {
+      const when = /中午/.test(t) ? `${dw}中午` : dw;
+      return names.length ? reply(`${when}${who}值班。`, lines) : reply(`${when}沒有人值班。`);
+    }
+    if (label === "休假" || label === "特休") return names.length ? reply(`${dw}${who}${label}。`, lines) : reply(`${dw}沒有人${label}。`);
+    return names.length ? reply(`${dw}${who}上${label}。`, lines) : reply(`${dw}沒有人上${label}。`);
   }
 
-  let me = false;
-  let ppl = findPerson(t);
-  if (!ppl.length && t.includes("我")) {
-    const p = peopleIndex().find((p) => s.name && (p.given === s.name || p.full === s.name));
-    if (p) { ppl = [p]; me = true; }
-  }
+  // 某人什麼班
+  const { ppl, me } = findWho(t, s);
   if (!ppl.length) return reply("我找不到這個人。可以只說名字，或在設定裡加綽號。");
   if (ppl.length > 1) return reply(`有 ${ppl.length} 位同名：${ppl.map((p) => p.full).join("、")}，是哪一位？`);
   const who = me ? "你" : ppl[0].given;
-  const days = mode === "day" ? [d] : [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(d, i));
-  const parts = [], lines = [];
-  for (const day of days) {
-    const sch = schedFor(day);
-    if (!sch) { if (mode === "day") return reply(`還沒有 ${day.getMonth() + 1} 月的班表。`); continue; }
-    const per = sch.people.find((p) => p.id === ppl[0].id);
-    const c = per && per.cells[day.getDate()];
-    if (!c) continue;
-    const x = describeCell(c, per, day, sch.holidays.includes(day.getDate()));
-    const say = codeSay(x.code, x.desc);
-    lines.push(`${dateLabel(day)}：${say}${x.raw && x.raw !== x.code ? "　（班表寫：" + x.raw + "）" : ""}`);
-    parts.push([`週${WD[wdOf(day)]}`, say]);
+  if (mode === "day") {
+    const r = cellOf(ppl[0], d);
+    if (!r) return reply(schedFor(d) ? `班表裡找不到 ${who} 這天的資料。` : `還沒有 ${d.getMonth() + 1} 月的班表。`);
+    const say = shortSay(r.x, r.c);
+    return reply(`${who}${dw}${/^[A-Z]/.test(say) ? " " : ""}${say}。`, r.x.raw && r.x.raw !== r.x.code ? [`班表寫：${r.x.raw}`] : null);
+  }
+  const parts = [];
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(d, i), r = cellOf(ppl[0], day);
+    if (r) parts.push(`週${WD[wdOf(day)]} ${shortSay(r.x, r.c)}`);
   }
   if (!parts.length) return reply(`班表裡找不到 ${who} 這幾天的資料。`);
-  if (mode === "day") return reply(`${who} ${dateLabel(d)}是${parts[0][1]}。`, lines);
   const mon = addDays(dayOnly(nowDate()), -wdOf(nowDate()));
   const diff = Math.round((d - mon) / 864e5);
   const wk = diff === 0 ? "這週" : diff === 7 ? "下週" : diff === -7 ? "上週" : "那週";
-  return reply(`${who}${wk}的班：${parts.map((p) => p.join(" ")).join("；")}。`, lines);
+  return reply(`${who}${wk}：${parts.join("；")}。`, parts);
 }
 
 // 某一天全部人的班（「明天誰上什麼班」）
@@ -475,16 +558,15 @@ function dayRoster(sch, d) {
   for (const p of sch.people) {
     const c = p.cells[d.getDate()]; if (!c) continue;
     const x = describeCell(c, p, d, hol);
-    const key = ["R", "r", "HS", "NN", "ZZ", "GB", "--"].includes(x.code) ? "休" : x.code;
+    const key = OFF.includes(x.code) ? "休" : x.code;
     (groups[key] = groups[key] || []).push(givenName(p.name) + (c.half ? `（${c.half}）` : ""));
-    lines.push(`${x.code.padEnd(3, "　")} ${p.name}　${x.desc}`);
+    lines.push(`${p.name}：${shortSay(x, c)}`);
   }
   const order = Object.keys(groups).sort((a, b) => (a === "休") - (b === "休") || (a === "N") - (b === "N") || a.localeCompare(b));
   const say = order.filter((k) => k !== "N" && k !== "休").map((k) => `${k}：${groups[k].join("、")}`);
   if (groups.N) say.push(`正常班 ${groups.N.length} 位`);
   if (groups["休"]) say.push(`休假：${groups["休"].join("、")}`);
-  lines.sort();
-  return reply(`${dateLabel(d)}。${say.join("。")}。`, lines);
+  return reply(`${dayWord(d)}。${say.join("。")}。`, lines);
 }
 
 function askShiftHours(t, codes, u) {
@@ -621,7 +703,7 @@ function reply(text, detail, extra) {
 }
 const HELP = [
   ["查資料", ["批價組組長分機", "發藥檯電腦 IP"]],
-  ["查班表", ["我明天什麼班", "我這週的班", "明天誰上什麼班", "明天誰上小夜", "明天誰上 S2", "明天誰休假"]],
+  ["查班表", ["我明天什麼班", "我這週的班", "我小夜什麼時候", "明天誰上什麼班", "明天誰上小夜", "明天誰上 S8", "今天中午誰值班", "明天誰休假"]],
   ["查時數", ["A3 請 PM 幾小時", "N 班請 1 小時", "週六 E 怎麼算", "S2 是幾點上班"]],
   ["提醒", ["10 分鐘後提醒我影印", "下午三點提醒我開會", "每天四點半提醒我對帳", "今天有哪些提醒", "取消影印的提醒"]],
   ["記事", ["記下來，明天要跟廠商確認交貨", "念出今天的記事", "念出跟廠商有關的記事", "刪除第二筆記事"]],
@@ -705,7 +787,7 @@ function answer(rawText) {
 
   // 班別時數
   const [codes, u] = findCodes(t);
-  const shiftish = /班|休|上什麼|上不上|誰/.test(t);
+  const shiftish = /班|休|上什麼|上不上|誰|小夜|大夜|值班/.test(t);
   if (codes.length && !t.includes("誰") && !findPerson(t, false).length &&
       /請|時數|小時|小夜|大夜|休加|怎麼算|AM|PM|UD|週六|星期六|幾點|時段|時間|上班|是什麼|代表/.test(u))
     return askShiftHours(t, codes, u);

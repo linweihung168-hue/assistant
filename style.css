@@ -126,3 +126,31 @@ h1{margin:0;font-size:30px;font-weight:900;letter-spacing:.5px}
 .help-g{margin:14px 0 4px;font-weight:900;font-size:15px;color:var(--accent-ink)}
 .help-q{display:inline-block;margin:4px 6px 4px 0;border:none;background:var(--gray);border-radius:999px;padding:9px 14px;font-size:15px;cursor:pointer}
 .toast{position:fixed;left:50%;bottom:calc(var(--tabh) + 16px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 18px;border-radius:14px;font-size:15px;z-index:20;width:max-content;max-width:calc(100% - 32px)}
+
+/* ===== 極簡版（2026-10-17）===== */
+.top{justify-content:flex-end;min-height:44px}
+#paneChat{min-height:calc(100vh - 210px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+.mic-card{background:none;padding:0;gap:22px;flex:1;justify-content:center;transition:flex .3s}
+.halo{width:300px;height:300px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle,rgba(47,140,255,.16) 0%,rgba(47,140,255,.06) 55%,rgba(47,140,255,0) 72%);transition:all .3s}
+.mic{width:200px;height:200px;background:linear-gradient(155deg,#8EDBFF 0%,#3D95FF 55%,#3C64F0 100%);
+  box-shadow:0 22px 48px rgba(47,110,255,.38),inset 0 2px 0 rgba(255,255,255,.55),inset 0 -10px 24px rgba(30,70,200,.25);transition:all .3s}
+.mic svg{width:46%;height:46%}
+.status{font-size:17px;font-weight:500;color:#8E8E9C}
+.mic-card[data-state="listening"] .status,.mic-card[data-state="speaking"] .status,.mic-card[data-state="thinking"] .status{color:var(--accent-ink);font-weight:700}
+.mic-card[data-state="listening"] .halo{animation:pulse 1.2s ease-in-out infinite;background:radial-gradient(circle,rgba(47,140,255,.30) 0%,rgba(47,140,255,.10) 55%,rgba(47,140,255,0) 72%)}
+.mic-card[data-state="thinking"] .halo,.mic-card[data-state="speaking"] .halo{animation:breathe 1.4s ease-in-out infinite;background:radial-gradient(circle,rgba(47,140,255,.24) 0%,rgba(47,140,255,.08) 55%,rgba(47,140,255,0) 72%)}
+/* 有對話後，麥克風縮小往上 */
+.has-chat .mic-card{flex:0 0 auto;gap:10px}
+.has-chat .halo{width:200px;height:200px}
+.has-chat .mic{width:140px;height:140px}
+.has-chat .status{font-size:15px}
+.chat{padding-bottom:70px}
+/* 打字框固定在最下面 */
+.typebar{position:fixed;left:16px;right:16px;bottom:calc(var(--tabh) + 10px + env(safe-area-inset-bottom));max-width:860px;margin:0 auto}
+@media (min-width:900px){
+  .typebar{position:sticky;left:auto;right:auto;bottom:14px;margin:0}
+  #paneChat{min-height:calc(100vh - 120px)}
+}
+.toast{bottom:calc(var(--tabh) + 74px + env(safe-area-inset-bottom))}
+@media (min-width:900px){ .toast{bottom:80px} }
