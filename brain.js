@@ -396,7 +396,11 @@ const SHIFT_CATS = {
   "正常班": ["N"], "白班": ["N", "M1"],
 };
 const CODE_RE = /(?<![A-Z0-9])(A1|A3|S1|S2|S7|S8|S9|E7|FA|NN|HS|ZZ|M1|B4|N|E|F|B|P)(?![A-Z0-9])/g;
+// 語音辨識常把英文字母寫成中文同音字，例如「愛斯2」＝S2、「欸3」＝A3
+const SOUND_LETTER = [[/(?:愛斯|艾斯|爱斯|ES)\s*(?=[0-9一二三四五六七八九])/gi, "S"], [/(?:欸|誒|ㄟ|诶)\s*(?=[0-9一二三四五六七八九])/g, "A"],
+  [/(?:伊|衣|依)\s*(?=[7七])/g, "E"], [/(?:逼|比)\s*(?=[0-9一二三四五六七八九])/g, "B"], [/(?:欸|誒)\s*(?:辅|輔|夫|福)/g, "F"]];
 function normCodes(t) {
+  for (const [re, l] of SOUND_LETTER) t = t.replace(re, l);
   let u = t.toUpperCase().replace(/\./g, "");
   u = u.replace(/([A-Z])\s+(?=[0-9一二三四五六七八九])/g, "$1");
   u = u.replace(/([A-Z])([一二三四五六七八九])/g, (m, a, b) => a + CN_DIG[b]);
@@ -419,19 +423,19 @@ function askSchedule(t, s) {
     let want = null, label = "";
     for (const k of Object.keys(SHIFT_CATS).sort((a, b) => b.length - a.length)) if (t.includes(k)) { want = SHIFT_CATS[k]; label = k; break; }
     if (!want && codes.length) { want = codes; label = codes.join("/"); }
-    if (!want) return reply("要查誰上什麼班？例如「明天誰上小夜」。");
     const sch = schedFor(d);
     if (!sch) return reply(`還沒有 ${d.getMonth() + 1} 月的班表。`);
+    if (!want) return dayRoster(sch, d);
     const hol = sch.holidays.includes(d.getDate());
     const names = [], lines = [];
     for (const p of sch.people) {
       const c = p.cells[d.getDate()]; if (!c) continue;
-      if ((label === "休假" || label === "休息") && !(c.raw || "").trim()) continue;
       const x = describeCell(c, p, d, hol);
       if (want.includes(x.code)) { names.push(givenName(p.name)); lines.push(`${p.name}：${x.code} ${x.desc}`); }
     }
-    if (!names.length) return reply(`${dateLabel(d)} 沒有人上${label}。`);
-    return reply(`${dateLabel(d)} 上${label}的有：${names.join("、")}。`, lines);
+    const verb = /休|特休/.test(label) ? "" : "上";
+    if (!names.length) return reply(`${dateLabel(d)} 沒有人${verb}${label}。`);
+    return reply(`${dateLabel(d)} ${verb}${label}的有：${names.join("、")}。`, lines);
   }
 
   let me = false;
@@ -462,6 +466,25 @@ function askSchedule(t, s) {
   const diff = Math.round((d - mon) / 864e5);
   const wk = diff === 0 ? "這週" : diff === 7 ? "下週" : diff === -7 ? "上週" : "那週";
   return reply(`${who}${wk}的班：${parts.map((p) => p.join(" ")).join("；")}。`, lines);
+}
+
+// 某一天全部人的班（「明天誰上什麼班」）
+function dayRoster(sch, d) {
+  const hol = sch.holidays.includes(d.getDate());
+  const groups = {}, lines = [];
+  for (const p of sch.people) {
+    const c = p.cells[d.getDate()]; if (!c) continue;
+    const x = describeCell(c, p, d, hol);
+    const key = ["R", "r", "HS", "NN", "ZZ", "GB", "--"].includes(x.code) ? "休" : x.code;
+    (groups[key] = groups[key] || []).push(givenName(p.name) + (c.half ? `（${c.half}）` : ""));
+    lines.push(`${x.code.padEnd(3, "　")} ${p.name}　${x.desc}`);
+  }
+  const order = Object.keys(groups).sort((a, b) => (a === "休") - (b === "休") || (a === "N") - (b === "N") || a.localeCompare(b));
+  const say = order.filter((k) => k !== "N" && k !== "休").map((k) => `${k}：${groups[k].join("、")}`);
+  if (groups.N) say.push(`正常班 ${groups.N.length} 位`);
+  if (groups["休"]) say.push(`休假：${groups["休"].join("、")}`);
+  lines.sort();
+  return reply(`${dateLabel(d)}。${say.join("。")}。`, lines);
 }
 
 function askShiftHours(t, codes, u) {
@@ -598,7 +621,7 @@ function reply(text, detail, extra) {
 }
 const HELP = [
   ["查資料", ["批價組組長分機", "發藥檯電腦 IP"]],
-  ["查班表", ["偉弘明天什麼班", "我這週的班", "明天誰上小夜"]],
+  ["查班表", ["我明天什麼班", "我這週的班", "明天誰上什麼班", "明天誰上小夜", "明天誰上 S2", "明天誰休假"]],
   ["查時數", ["A3 請 PM 幾小時", "N 班請 1 小時", "週六 E 怎麼算", "S2 是幾點上班"]],
   ["提醒", ["10 分鐘後提醒我影印", "下午三點提醒我開會", "每天四點半提醒我對帳", "今天有哪些提醒", "取消影印的提醒"]],
   ["記事", ["記下來，明天要跟廠商確認交貨", "念出今天的記事", "念出跟廠商有關的記事", "刪除第二筆記事"]],
